@@ -1,0 +1,889 @@
+
+local Players = game:GetService("Players")
+local localPlayer = Players.LocalPlayer
+local uis = game:GetService("UserInputService")
+local runService = game:GetService("RunService")
+local camera = workspace.CurrentCamera
+local coreGui = game:GetService("CoreGui")
+local httpService = game:GetService("HttpService")
+local marketplaceService = game:GetService("MarketplaceService")
+
+-- GUI Parent
+local guiParent = (pcall(function() return coreGui:IsA("CoreGui") end) and coreGui) or localPlayer:WaitForChild("PlayerGui")
+
+-- Remove old panel
+if guiParent:FindFirstChild("MobileCmdBar") then
+    guiParent.MobileCmdBar:Destroy()
+end
+
+-- String split
+local function splitString(str, sep)
+    local parts = {}
+    for match in string.gmatch(str, "([^" .. sep .. "]+)") do
+        table.insert(parts, match)
+    end
+    return parts
+end
+
+-- Variables
+local character, humanoidRootPart, humanoid
+local flying = false
+local noclip = false
+local viewing = false
+local sittingOnHead = false
+local targetPlayer = nil
+local flyConnection, viewConnection, headSitConnection, jumpConnection, loopConnection
+local infJumpConnection, antiKBConnection
+local infJumpActive = false
+local antiKB_Active = false
+local loopDirection = nil
+local flySpeed = 50
+local loopSpeed = 16
+local cooldown = 0.4
+local lastCmdTime = 0
+local history = {}
+local historyIndex = 0
+
+local screenGui, textBox, statusLabel, suggestionLabel, creditLabel
+local flySpeedInput, loopSpeedInput
+local upButton, downButton
+local upPressed = false
+local downPressed = false
+
+-- Game info
+local gameName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name or game.Name
+local placeId = game.PlaceId
+
+-- Webhook (improved)
+local function sendWebhook(message)
+    if not WEBHOOK_URL or WEBHOOK_URL == "" then return end
+    local data = {
+        content = string.format(
+            "**[CMD] %s** (Place: %s [%d])\n```%s```",
+            localPlayer.Name,
+            gameName,
+            placeId,
+            message
+        )
+    }
+    pcall(function()
+        httpService:PostAsync(WEBHOOK_URL, httpService:JSONEncode(data), Enum.HttpContentType.ApplicationJson)
+    end)
+end
+
+-- Find player
+local function findPlayer(namePart)
+    if not namePart then return nil end
+    namePart = string.lower(namePart)
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= localPlayer then
+            if string.lower(player.Name):sub(1, #namePart) == namePart
+                or string.lower(player.DisplayName):sub(1, #namePart) == namePart then
+                return player
+            end
+        end
+    end
+    return nil
+end
+
+-- Update status and speed input visibility
+local function updateStatus()
+    if not statusLabel then return end
+    local flyText = flying and "on 🟢" or "off 🔴"
+    local noclipText = noclip and "on 🟢" or "off 🔴"
+    local loopText = loopDirection and "on 🟢" or "off 🔴"
+    statusLabel.Text = string.format("Fly: %s  Noclip: %s  Loop: %s", flyText, noclipText, loopText)
+
+    if flySpeedInput and loopSpeedInput then
+        local showFly = flying
+        local showLoop = loopDirection ~= nil
+
+        flySpeedInput.Visible = showFly
+        loopSpeedInput.Visible = showLoop
+
+        if showFly and showLoop then
+            flySpeedInput.Size = UDim2.new(0.5, -2, 1, 0)
+            flySpeedInput.Position = UDim2.new(0, 0, 0, 0)
+            loopSpeedInput.Size = UDim2.new(0.5, -2, 1, 0)
+            loopSpeedInput.Position = UDim2.new(0.5, 2, 0, 0)
+        elseif showFly then
+            flySpeedInput.Size = UDim2.new(1, 0, 1, 0)
+            flySpeedInput.Position = UDim2.new(0, 0, 0, 0)
+        elseif showLoop then
+            loopSpeedInput.Size = UDim2.new(1, 0, 1, 0)
+            loopSpeedInput.Position = UDim2.new(0, 0, 0, 0)
+        end
+    end
+
+    -- Show/hide up/down buttons
+    if upButton and downButton then
+        upButton.Visible = flying
+        downButton.Visible = flying
+    end
+end
+
+-- Noclip
+local function setNoclip(state)
+    noclip = state
+    if character then
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = not state
+            end
+        end
+    end
+    updateStatus()
+end
+
+-- Fly
+local function startFly(speed)
+    if not humanoidRootPart or not humanoid then return end
+    if flying then
+        flySpeed = speed or flySpeed
+        updateStatus()
+        return
+    end
+
+    flying = true
+    flySpeed = speed or 50
+    humanoid.PlatformStand = true
+
+    local bg = Instance.new("BodyGyro")
+    bg.Name = "Mobile_Fly_Gyro"
+    bg.P = 9e4
+    bg.maxTorque = Vector3.new(9e9, 9e9, 9e9)
+    bg.CFrame = humanoidRootPart.CFrame
+    bg.Parent = humanoidRootPart
+
+    local bv = Instance.new("BodyVelocity")
+    bv.Name = "Mobile_Fly_Velocity"
+    bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    bv.Velocity = Vector3.zero
+    bv.Parent = humanoidRootPart
+
+    if flyConnection then flyConnection:Disconnect() end
+    flyConnection = runService.RenderStepped:Connect(function()
+        if not flying or not humanoidRootPart or not humanoidRootPart.Parent then return end
+
+        bg.CFrame = camera.CFrame
+
+        local moveDir = Vector3.zero
+        if uis:IsKeyDown(Enum.KeyCode.W) then moveDir += camera.CFrame.LookVector end
+        if uis:IsKeyDown(Enum.KeyCode.S) then moveDir -= camera.CFrame.LookVector end
+        if uis:IsKeyDown(Enum.KeyCode.A) then moveDir -= camera.CFrame.RightVector end
+        if uis:IsKeyDown(Enum.KeyCode.D) then moveDir += camera.CFrame.RightVector end
+
+        -- Vertical movement (keyboard)
+        if uis:IsKeyDown(Enum.KeyCode.Space) or upPressed then
+            moveDir += Vector3.new(0, 1, 0)
+        end
+        if uis:IsKeyDown(Enum.KeyCode.LeftShift) or uis:IsKeyDown(Enum.KeyCode.LeftControl) or downPressed then
+            moveDir += Vector3.new(0, -1, 0)
+        end
+
+        -- Mobile joystick (camera relative)
+        if humanoid.MoveDirection.Magnitude > 0.1 then
+            moveDir += humanoid.MoveDirection
+        end
+
+        if moveDir.Magnitude > 0 then
+            moveDir = moveDir.Unit
+        end
+
+        bv.Velocity = moveDir * flySpeed
+    end)
+
+    updateStatus()
+end
+
+local function stopFly()
+    flying = false
+    if humanoid then humanoid.PlatformStand = false end
+    if flyConnection then flyConnection:Disconnect() flyConnection = nil end
+    if humanoidRootPart then
+        local g = humanoidRootPart:FindFirstChild("Mobile_Fly_Gyro")
+        local v = humanoidRootPart:FindFirstChild("Mobile_Fly_Velocity")
+        if g then g:Destroy() end
+        if v then v:Destroy() end
+    end
+    upPressed = false
+    downPressed = false
+    updateStatus()
+end
+
+-- View
+local function startView(plr)
+    if not plr then return end
+    targetPlayer = plr
+    viewing = true
+
+    if viewConnection then viewConnection:Disconnect() end
+    viewConnection = runService.RenderStepped:Connect(function()
+        if viewing and targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("Humanoid") then
+            camera.CameraSubject = targetPlayer.Character.Humanoid
+        else
+            stopView()
+        end
+    end)
+end
+
+local function stopView()
+    viewing = false
+    if viewConnection then viewConnection:Disconnect() viewConnection = nil end
+    if humanoid then camera.CameraSubject = humanoid end
+    targetPlayer = nil
+end
+
+-- HeadSit
+local function startHeadSit(plr)
+    if not plr or not humanoidRootPart then return end
+    targetPlayer = plr
+    sittingOnHead = true
+
+    if headSitConnection then headSitConnection:Disconnect() end
+    if jumpConnection then jumpConnection:Disconnect() end
+
+    jumpConnection = humanoid.StateChanged:Connect(function(_, newState)
+        if newState == Enum.HumanoidStateType.Jumping then stopHeadSit() end
+    end)
+
+    headSitConnection = runService.Heartbeat:Connect(function()
+        if sittingOnHead and targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("Head") then
+            local head = targetPlayer.Character.Head
+            humanoidRootPart.CFrame = head.CFrame * CFrame.new(0, 1.8, 0)
+            humanoidRootPart.AssemblyLinearVelocity = Vector3.zero
+        else
+            stopHeadSit()
+        end
+    end)
+end
+
+local function stopHeadSit()
+    sittingOnHead = false
+    if headSitConnection then headSitConnection:Disconnect() headSitConnection = nil end
+    if jumpConnection then jumpConnection:Disconnect() jumpConnection = nil end
+    targetPlayer = nil
+end
+
+-- InfJump
+local function toggleInfJump()
+    infJumpActive = not infJumpActive
+    if infJumpConnection then infJumpConnection:Disconnect() infJumpConnection = nil end
+    if infJumpActive and humanoid then
+        infJumpConnection = humanoid.StateChanged:Connect(function(_, newState)
+            if infJumpActive and newState == Enum.HumanoidStateType.Landed then humanoid.Jump = true end
+        end)
+    end
+end
+
+-- AntiKB
+local function toggleAntiKB()
+    antiKB_Active = not antiKB_Active
+    if antiKBConnection then antiKBConnection:Disconnect() antiKBConnection = nil end
+    if antiKB_Active then
+        antiKBConnection = runService.Heartbeat:Connect(function()
+            if antiKB_Active and humanoidRootPart then
+                local vel = humanoidRootPart.AssemblyLinearVelocity
+                humanoidRootPart.AssemblyLinearVelocity = Vector3.new(0, vel.Y, 0)
+            end
+        end)
+    end
+end
+
+-- Loop
+local function startLoop(dir)
+    if loopConnection then loopConnection:Disconnect() loopConnection = nil end
+
+    if dir == "off" or dir == "stop" then
+        loopDirection = nil
+        updateStatus()
+        return
+    end
+
+    loopDirection = dir
+    loopConnection = runService.Heartbeat:Connect(function()
+        if not loopDirection or not humanoidRootPart then return end
+
+        local rootCFrame = humanoidRootPart.CFrame
+        local moveVec = Vector3.zero
+
+        if loopDirection == "w" then
+            moveVec = rootCFrame.LookVector * loopSpeed
+        elseif loopDirection == "s" then
+            moveVec = -rootCFrame.LookVector * loopSpeed
+        elseif loopDirection == "a" then
+            moveVec = -rootCFrame.RightVector * loopSpeed
+        elseif loopDirection == "d" then
+            moveVec = rootCFrame.RightVector * loopSpeed
+        elseif loopDirection == "space" or loopDirection == "jump" then
+            humanoid.Jump = true
+            return
+        end
+
+        humanoidRootPart.AssemblyLinearVelocity = Vector3.new(moveVec.X, humanoidRootPart.AssemblyLinearVelocity.Y, moveVec.Z)
+    end)
+    updateStatus()
+end
+
+-- Stop all active features
+local function stopAll()
+    stopFly()
+    setNoclip(false)
+    startLoop("off")
+    stopView()
+    stopHeadSit()
+    if infJumpActive then toggleInfJump() end
+    if antiKB_Active then toggleAntiKB() end
+    if textBox then textBox.PlaceholderText = "✅ All features stopped" task.delay(2, function() if textBox then textBox.PlaceholderText = "Type command..." end end) end
+end
+
+-- Help panel
+local helpPanel = nil
+local function openHelpPanel()
+    if helpPanel then return end
+    helpPanel = Instance.new("Frame")
+    helpPanel.Size = UDim2.new(0.9, 0, 0.8, 0)
+    helpPanel.Position = UDim2.new(0.05, 0, 0.1, 0)
+    helpPanel.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+    helpPanel.BackgroundTransparency = 0.2
+    helpPanel.BorderSizePixel = 0
+    helpPanel.Parent = screenGui
+    Instance.new("UICorner", helpPanel).CornerRadius = UDim.new(0, 6)
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, 0, 0, 30)
+    title.BackgroundTransparency = 1
+    title.Text = "Command List"
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.TextSize = 18
+    title.Font = Enum.Font.GothamBold
+    title.Parent = helpPanel
+
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0, 30, 0, 30)
+    closeBtn.Position = UDim2.new(1, -30, 0, 0)
+    closeBtn.BackgroundTransparency = 1
+    closeBtn.Text = "X"
+    closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeBtn.TextSize = 18
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.Parent = helpPanel
+    closeBtn.MouseButton1Click:Connect(function()
+        if helpPanel then helpPanel:Destroy() helpPanel = nil end
+    end)
+
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Size = UDim2.new(1, -10, 1, -40)
+    scroll.Position = UDim2.new(0, 5, 0, 35)
+    scroll.BackgroundTransparency = 1
+    scroll.BorderSizePixel = 0
+    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    scroll.ScrollBarThickness = 6
+    scroll.Parent = helpPanel
+
+    local commands = {
+        {"fly [speed]", "Start fly mode (optional speed)"},
+        {"unfly", "Stop fly mode"},
+        {"noclip", "Enable noclip"},
+        {"unnoclip", "Disable noclip"},
+        {"tp <player>", "Teleport to player"},
+        {"view <player>", "View player"},
+        {"unview", "Stop viewing"},
+        {"headsit <player>", "Sit on player's head"},
+        {"unheadsit", "Stop head sit"},
+        {"speed <number>", "Set walkspeed"},
+        {"jp <number>", "Set jump power"},
+        {"re / reset", "Reset character"},
+        {"infjump", "Toggle infinite jump"},
+        {"antikb", "Toggle anti-knockback"},
+        {"sit", "Toggle sit"},
+        {"loop <w/s/a/d/space/jump/off>", "Loop movement"},
+        {"unloop", "Stop loop"},
+        {"stop", "Stop all features"},
+        {"help", "Show this help"},
+    }
+
+    local y = 0
+    for _, cmd in ipairs(commands) do
+        local line = Instance.new("TextLabel")
+        line.Size = UDim2.new(1, 0, 0, 20)
+        line.Position = UDim2.new(0, 0, 0, y)
+        line.BackgroundTransparency = 1
+        line.Text = string.format("%-15s  %s", cmd[1], cmd[2])
+        line.TextColor3 = Color3.fromRGB(200, 200, 200)
+        line.TextSize = 12
+        line.Font = Enum.Font.Gotham
+        line.TextXAlignment = Enum.TextXAlignment.Left
+        line.Parent = scroll
+        y = y + 22
+    end
+
+    scroll.CanvasSize = UDim2.new(0, 0, 0, y + 10)
+end
+
+-- Command processor
+local function processCommand(message)
+    if not message or message == "" then return end
+
+    if not character or not humanoidRootPart or not humanoid then
+        if textBox then
+            textBox.PlaceholderText = "❌ Character not fully loaded, wait..."
+            task.delay(2, function() if textBox then textBox.PlaceholderText = "Type command..." end end)
+        end
+        return
+    end
+
+    local now = tick()
+    if now - lastCmdTime < cooldown then
+        if textBox then textBox.PlaceholderText = "⏳ Slow down!" task.delay(1, function() if textBox then textBox.PlaceholderText = "Type command..." end end) end
+        return
+    end
+    lastCmdTime = now
+
+    sendWebhook(message)
+    print("[MobileCmdBar] Command received:", message)
+
+    table.insert(history, message)
+    if #history > 25 then table.remove(history, 1) end
+    historyIndex = #history + 1
+
+    local args = splitString(message, " ")
+    local cmd = string.lower(args[1] or "")
+    local param = args[2]
+
+    local success, err = pcall(function()
+        if cmd == "fly" then startFly(param and tonumber(param))
+        elseif cmd == "unfly" then stopFly()
+        elseif cmd == "noclip" then setNoclip(true)
+        elseif cmd == "unnoclip" then setNoclip(false)
+        elseif cmd == "tp" and param then
+            local plr = findPlayer(param)
+            if plr and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+                humanoidRootPart.CFrame = plr.Character.HumanoidRootPart.CFrame + Vector3.new(0, 3, 0)
+            else
+                if textBox then textBox.PlaceholderText = "❌ Player not found!" task.delay(1.5, function() if textBox then textBox.PlaceholderText = "Type command..." end end) end
+            end
+        elseif cmd == "view" and param then
+            local plr = findPlayer(param)
+            if plr then startView(plr) else if textBox then textBox.PlaceholderText = "❌ Player not found!" task.delay(1.5, function() if textBox then textBox.PlaceholderText = "Type command..." end end) end end
+        elseif cmd == "unview" then stopView()
+        elseif cmd == "headsit" and param then
+            local plr = findPlayer(param)
+            if plr then startHeadSit(plr) else if textBox then textBox.PlaceholderText = "❌ Player not found!" task.delay(1.5, function() if textBox then textBox.PlaceholderText = "Type command..." end end) end end
+        elseif cmd == "unheadsit" then stopHeadSit()
+        elseif cmd == "speed" and param then
+            local val = tonumber(param)
+            if val then humanoid.WalkSpeed = val end
+        elseif cmd == "jp" and param then
+            local val = tonumber(param)
+            if val then humanoid.UseJumpPower = true humanoid.JumpPower = val end
+        elseif cmd == "re" or cmd == "reset" then character:BreakJoints()
+        elseif cmd == "help" then
+            openHelpPanel()
+        elseif cmd == "infjump" then toggleInfJump()
+        elseif cmd == "antikb" then toggleAntiKB()
+        elseif cmd == "sit" then humanoid.Sit = not humanoid.Sit
+        elseif cmd == "loop" and param then startLoop(string.lower(param))
+        elseif cmd == "unloop" then startLoop("off")
+        elseif cmd == "stop" then stopAll()
+        else
+            if textBox then textBox.PlaceholderText = "❌ Unknown command!" task.delay(1.5, function() if textBox then textBox.PlaceholderText = "Type command..." end end) end
+        end
+    end)
+
+    if not success then
+        print("[MobileCmdBar] Error:", err)
+        if textBox then textBox.PlaceholderText = "⚠️ Error: " .. tostring(err) task.delay(2.5, function() if textBox then textBox.PlaceholderText = "Type command..." end end) end
+    end
+end
+
+-- GUI creation
+local function createGUI()
+    screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "MobileCmdBar"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = guiParent
+
+    -- Startup black overlay with "Type "help" in the chat or cmdbar to learn the commands." text
+    local startupOverlay = Instance.new("Frame")
+    startupOverlay.Size = UDim2.new(1, 0, 1, 0)
+    startupOverlay.BackgroundColor3 = Color3.new(0, 0, 0)
+    startupOverlay.BorderSizePixel = 0
+    startupOverlay.Parent = screenGui
+
+    local helpLabel = Instance.new("TextLabel")
+    helpLabel.Size = UDim2.new(1, 0, 1, 0)
+    helpLabel.BackgroundTransparency = 1
+    helpLabel.Text = "Type ‘help’ in the chat or cmdbar to learn the commands."
+    helpLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    helpLabel.TextSize = 20
+    helpLabel.Font = Enum.Font.GothamBold
+    helpLabel.Parent = startupOverlay
+
+    task.delay(3, function()
+        if startupOverlay then startupOverlay:Destroy() end
+    end)
+
+    -- Main frame (black background)
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Size = UDim2.new(0, 280, 0, 130)
+    mainFrame.Position = UDim2.new(1, -300, 0, 10)
+    mainFrame.BackgroundColor3 = Color3.new(0, 0, 0) -- black
+    mainFrame.BorderSizePixel = 0
+    mainFrame.Parent = screenGui
+    Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 4)
+
+    local topBar = Instance.new("Frame")
+    topBar.Size = UDim2.new(1, 0, 0, 25)
+    topBar.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
+    topBar.BorderSizePixel = 0
+    topBar.Parent = mainFrame
+    Instance.new("UICorner", topBar).CornerRadius = UDim.new(0, 4)
+
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Size = UDim2.new(1, -70, 1, 0)
+    titleLabel.Position = UDim2.new(0, 8, 0, 0)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = "LightningHub⚡️CMDBAR"
+    titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    titleLabel.TextSize = 12
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.Parent = topBar
+
+    local minimizeBtn = Instance.new("TextButton")
+    minimizeBtn.Size = UDim2.new(0, 25, 1, 0)
+    minimizeBtn.Position = UDim2.new(1, -30, 0, 0)
+    minimizeBtn.BackgroundTransparency = 1
+    minimizeBtn.Text = "−"
+    minimizeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    minimizeBtn.TextSize = 16
+    minimizeBtn.Font = Enum.Font.GothamBold
+    minimizeBtn.Parent = topBar
+
+    local contentContainer = Instance.new("Frame")
+    contentContainer.Size = UDim2.new(1, 0, 1, -25)
+    contentContainer.Position = UDim2.new(0, 0, 0, 25)
+    contentContainer.BackgroundTransparency = 1
+    contentContainer.Parent = mainFrame
+
+    -- Status line
+    statusLabel = Instance.new("TextLabel")
+    statusLabel.Size = UDim2.new(0.6, -4, 0, 15)
+    statusLabel.Position = UDim2.new(0, 4, 1, -34)
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Text = "Fly: off  Noclip: off  Loop: off"
+    statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    statusLabel.TextSize = 9
+    statusLabel.Font = Enum.Font.Gotham
+    statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+    statusLabel.Parent = contentContainer
+
+    -- Credit label
+    creditLabel = Instance.new("TextLabel")
+    creditLabel.Size = UDim2.new(1, -8, 0, 12)
+    creditLabel.Position = UDim2.new(0, 4, 1, -18)
+    creditLabel.BackgroundTransparency = 1
+    creditLabel.Text = "prepared by halilibrahimseviml1"
+    creditLabel.TextColor3 = Color3.fromRGB(100, 100, 100)
+    creditLabel.TextSize = 8
+    creditLabel.Font = Enum.Font.Gotham
+    creditLabel.TextXAlignment = Enum.TextXAlignment.Left
+    creditLabel.Parent = contentContainer
+
+    -- Speed input container
+    local speedInputContainer = Instance.new("Frame")
+    speedInputContainer.Size = UDim2.new(0.4, -4, 0, 15)
+    speedInputContainer.Position = UDim2.new(0.6, 0, 1, -34)
+    speedInputContainer.BackgroundTransparency = 1
+    speedInputContainer.Parent = contentContainer
+
+    flySpeedInput = Instance.new("TextBox")
+    flySpeedInput.Size = UDim2.new(1, 0, 1, 0)
+    flySpeedInput.Position = UDim2.new(0, 0, 0, 0)
+    flySpeedInput.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    flySpeedInput.BorderSizePixel = 0
+    flySpeedInput.PlaceholderText = "fly speed"
+    flySpeedInput.Text = ""
+    flySpeedInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+    flySpeedInput.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
+    flySpeedInput.TextSize = 9
+    flySpeedInput.Font = Enum.Font.Gotham
+    flySpeedInput.ClearTextOnFocus = false
+    flySpeedInput.Visible = false
+    flySpeedInput.Parent = speedInputContainer
+    Instance.new("UICorner", flySpeedInput).CornerRadius = UDim.new(0, 2)
+
+    loopSpeedInput = Instance.new("TextBox")
+    loopSpeedInput.Size = UDim2.new(1, 0, 1, 0)
+    loopSpeedInput.Position = UDim2.new(0, 0, 0, 0)
+    loopSpeedInput.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    loopSpeedInput.BorderSizePixel = 0
+    loopSpeedInput.PlaceholderText = "loop speed"
+    loopSpeedInput.Text = ""
+    loopSpeedInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+    loopSpeedInput.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
+    loopSpeedInput.TextSize = 9
+    loopSpeedInput.Font = Enum.Font.Gotham
+    loopSpeedInput.ClearTextOnFocus = false
+    loopSpeedInput.Visible = false
+    loopSpeedInput.Parent = speedInputContainer
+    Instance.new("UICorner", loopSpeedInput).CornerRadius = UDim.new(0, 2)
+
+    flySpeedInput.FocusLost:Connect(function(enterPressed)
+        if enterPressed then
+            local val = tonumber(flySpeedInput.Text)
+            if val then
+                flySpeed = val
+                print("[MobileCmdBar] Fly speed updated:", flySpeed)
+            end
+            flySpeedInput.Text = ""
+        end
+    end)
+
+    loopSpeedInput.FocusLost:Connect(function(enterPressed)
+        if enterPressed then
+            local val = tonumber(loopSpeedInput.Text)
+            if val then
+                loopSpeed = val
+                print("[MobileCmdBar] Loop speed updated:", loopSpeed)
+            end
+            loopSpeedInput.Text = ""
+        end
+    end)
+
+    -- Command text box
+    textBox = Instance.new("TextBox")
+    textBox.Size = UDim2.new(1, -80, 0, 35)
+    textBox.Position = UDim2.new(0, 8, 0, 5)
+    textBox.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    textBox.BorderSizePixel = 0
+    textBox.PlaceholderText = "Character loading..."
+    textBox.Text = ""
+    textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+    textBox.PlaceholderColor3 = Color3.fromRGB(120, 120, 120)
+    textBox.TextSize = 12
+    textBox.Font = Enum.Font.Gotham
+    textBox.ClearTextOnFocus = false
+    textBox.Parent = contentContainer
+    Instance.new("UICorner", textBox).CornerRadius = UDim.new(0, 3)
+
+    local execButton = Instance.new("TextButton")
+    execButton.Size = UDim2.new(0, 65, 0, 35)
+    execButton.Position = UDim2.new(1, -73, 0, 5)
+    execButton.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
+    execButton.BorderSizePixel = 0
+    execButton.Text = "EXECUTE"
+    execButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    execButton.TextSize = 10
+    execButton.Font = Enum.Font.GothamBold
+    execButton.Parent = contentContainer
+    Instance.new("UICorner", execButton).CornerRadius = UDim.new(0, 3)
+
+    suggestionLabel = Instance.new("TextLabel")
+    suggestionLabel.Size = UDim2.new(1, -8, 0, 14)
+    suggestionLabel.Position = UDim2.new(0, 8, 0, 43)
+    suggestionLabel.BackgroundTransparency = 1
+    suggestionLabel.Text = ""
+    suggestionLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+    suggestionLabel.TextSize = 9
+    suggestionLabel.Font = Enum.Font.Gotham
+    suggestionLabel.TextXAlignment = Enum.TextXAlignment.Left
+    suggestionLabel.Parent = contentContainer
+
+    -- Mobile fly up/down buttons
+    local function createFlyButton(text, pos, isUp)
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(0, 40, 0, 30)
+        btn.Position = pos
+        btn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        btn.BorderSizePixel = 0
+        btn.Text = text
+        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btn.TextSize = 14
+        btn.Font = Enum.Font.GothamBold
+        btn.Visible = false
+        btn.Parent = contentContainer
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 3)
+
+        btn.MouseButton1Down:Connect(function()
+            if isUp then upPressed = true else downPressed = true end
+        end)
+        btn.MouseButton1Up:Connect(function()
+            if isUp then upPressed = false else downPressed = false end
+        end)
+        btn.MouseLeave:Connect(function()
+            if isUp then upPressed = false else downPressed = false end
+        end)
+        return btn
+    end
+
+    upButton = createFlyButton("▲", UDim2.new(0, 8, 0, 43), true)
+    downButton = createFlyButton("▼", UDim2.new(0, 52, 0, 43), false)
+
+    -- Minimize
+    local minimized = false
+    minimizeBtn.MouseButton1Click:Connect(function()
+        minimized = not minimized
+        contentContainer.Visible = not minimized
+        mainFrame.Size = minimized and UDim2.new(0, 280, 0, 25) or UDim2.new(0, 280, 0, 130)
+        minimizeBtn.Text = minimized and "+" or "−"
+    end)
+
+    -- Dragging
+    local dragging, dragInput, dragStart, startPos
+    topBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = mainFrame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+
+    topBar.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+
+    uis.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+
+    -- Command execution
+    execButton.MouseButton1Click:Connect(function()
+        local txt = textBox.Text
+        if txt ~= "" then
+            processCommand(txt)
+            textBox.Text = ""
+            suggestionLabel.Text = ""
+        end
+    end)
+
+    textBox.FocusLost:Connect(function(enterPressed)
+        if enterPressed then
+            local txt = textBox.Text
+            if txt ~= "" then
+                processCommand(txt)
+                textBox.Text = ""
+                suggestionLabel.Text = ""
+            end
+        end
+    end)
+
+    -- Chat commands
+    localPlayer.Chatted:Connect(function(msg)
+        processCommand(msg)
+    end)
+
+    -- Command history
+    uis.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if input.KeyCode == Enum.KeyCode.Up then
+            if #history > 0 then
+                historyIndex = math.max(1, historyIndex - 1)
+                textBox.Text = history[historyIndex]
+            end
+        elseif input.KeyCode == Enum.KeyCode.Down then
+            if historyIndex < #history then
+                historyIndex = historyIndex + 1
+                textBox.Text = history[historyIndex] or ""
+            else
+                textBox.Text = ""
+                historyIndex = #history + 1
+            end
+        end
+    end)
+
+    -- Auto-suggestion
+    textBox.Changed:Connect(function(property)
+        if property ~= "Text" then return end
+        local txt = textBox.Text
+        if #txt < 1 then suggestionLabel.Text = "" return end
+        local firstWord = string.match(txt, "^%S+") or ""
+        if firstWord:lower() == "tp" or firstWord:lower() == "view" or firstWord:lower() == "headsit" then
+            local partial = string.match(txt, "^%S+%s+(.+)$") or ""
+            if partial ~= "" then
+                for _, player in ipairs(Players:GetPlayers()) do
+                    if player ~= localPlayer then
+                        if string.lower(player.Name):sub(1, #partial) == string.lower(partial)
+                            or string.lower(player.DisplayName):sub(1, #partial) == string.lower(partial) then
+                            suggestionLabel.Text = "👉 " .. player.Name
+                            return
+                        end
+                    end
+                end
+            end
+        end
+        suggestionLabel.Text = ""
+    end)
+
+    updateStatus()
+end
+
+-- Setup character
+local function setupCharacter(newChar)
+    character = newChar
+    humanoidRootPart = character:WaitForChild("HumanoidRootPart", 10)
+    humanoid = character:WaitForChild("Humanoid", 10)
+
+    if not humanoidRootPart or not humanoid then
+        print("[MobileCmdBar] Error: HumanoidRootPart or Humanoid not found!")
+        character = nil
+        humanoidRootPart = nil
+        humanoid = nil
+        return
+    end
+
+    print("[MobileCmdBar] Character ready:", character.Name)
+    if textBox then textBox.PlaceholderText = "Type command..." end
+
+    if noclip then setNoclip(true) end
+    if infJumpActive then toggleInfJump() toggleInfJump() end
+    if antiKB_Active then toggleAntiKB() toggleAntiKB() end
+
+    updateStatus()
+end
+
+-- Create GUI
+createGUI()
+
+-- Wait for initial character
+local function waitForCharacter()
+    repeat task.wait() until localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") and localPlayer.Character:FindFirstChild("Humanoid")
+    setupCharacter(localPlayer.Character)
+end
+
+waitForCharacter()
+
+localPlayer.CharacterAdded:Connect(function(char)
+    print("[MobileCmdBar] New character spawned.")
+    if textBox then textBox.PlaceholderText = "Character loading..." end
+    task.wait()
+    setupCharacter(char)
+end)
+
+localPlayer.CharacterRemoving:Connect(function()
+    character = nil
+    humanoidRootPart = nil
+    humanoid = nil
+    stopFly()
+    stopView()
+    stopHeadSit()
+    if loopConnection then loopConnection:Disconnect() loopConnection = nil end
+    loopDirection = nil
+    if infJumpConnection then infJumpConnection:Disconnect() infJumpConnection = nil end
+    if antiKBConnection then antiKBConnection:Disconnect() antiKBConnection = nil end
+    upPressed = false
+    downPressed = false
+    updateStatus()
+    print("[MobileCmdBar] Character removed.")
+end)
+
+print("[MobileCmdBar] Script loaded! (v10)")
