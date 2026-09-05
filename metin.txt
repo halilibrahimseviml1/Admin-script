@@ -1,3 +1,7 @@
+-- ============================================
+--         LIGHTNING MOBILE CMDBAR + ESP
+--         prepared by halilibrahimseviml1
+-- ============================================
 
 local Players = game:GetService("Players")
 local localPlayer = Players.LocalPlayer
@@ -16,7 +20,177 @@ if guiParent:FindFirstChild("MobileCmdBar") then
     guiParent.MobileCmdBar:Destroy()
 end
 
--- String split
+-- ============================
+--         ESP MODÜLÜ
+-- ============================
+local espEnabled = false      -- Başlangıçta KAPALI
+local espSize = 1.0
+local espShowHealth = true
+local espConnections = {}
+local healthConnections = {}
+
+local function removeESP(player)
+    if player.Character and player.Character:FindFirstChild("TeamESP") then
+        player.Character.TeamESP:Destroy()
+    end
+    if healthConnections[player] then
+        healthConnections[player]:Disconnect()
+        healthConnections[player] = nil
+    end
+end
+
+local function createESP(player)
+    if player == localPlayer then return end
+
+    local function addVisuals(character)
+        if not character:WaitForChild("HumanoidRootPart", 5) then return end
+        if character:FindFirstChild("TeamESP") then
+            character.TeamESP:Destroy()
+        end
+
+        local folder = Instance.new("Folder")
+        folder.Name = "TeamESP"
+        folder.Parent = character
+
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "BoxESP"
+        highlight.Adornee = character
+        highlight.FillTransparency = 0.5
+        highlight.OutlineTransparency = 0
+        highlight.Enabled = espEnabled
+        highlight.Parent = folder
+
+        local billboard = Instance.new("BillboardGui")
+        billboard.Name = "NameESP"
+        billboard.Adornee = character:WaitForChild("Head")
+        billboard.Size = UDim2.new(0, 80 * espSize, 0, 30 * espSize)
+        billboard.StudsOffset = Vector3.new(0, 1.8, 0)
+        billboard.AlwaysOnTop = true
+        billboard.Enabled = espEnabled
+        billboard.Parent = folder
+
+        local textLabel = Instance.new("TextLabel")
+        textLabel.Size = UDim2.new(1, 0, 1, 0)
+        textLabel.BackgroundTransparency = 1
+        textLabel.TextSize = 9 * espSize
+        textLabel.Font = Enum.Font.SourceSansBold
+        textLabel.TextWrapped = true
+        textLabel.RichText = true   -- Renkli metin için
+        textLabel.Parent = billboard
+
+        local humanoid = character:WaitForChild("Humanoid", 5)
+
+        local function updateVisuals()
+            if not folder.Parent then return end
+
+            -- Kutu rengi (takıma göre)
+            local fillColor = Color3.fromRGB(255, 255, 0)
+            local nameColor = Color3.fromRGB(255, 255, 0)
+
+            if player.Team and localPlayer.Team then
+                if player.Team == localPlayer.Team then
+                    fillColor = Color3.fromRGB(0, 255, 0)
+                    nameColor = Color3.fromRGB(0, 255, 0)
+                else
+                    fillColor = Color3.fromRGB(255, 0, 0)
+                    nameColor = Color3.fromRGB(255, 0, 0)
+                end
+            end
+
+            highlight.FillColor = fillColor
+
+            -- İsim (takım renginde)
+            local r, g, b = nameColor.R*255, nameColor.G*255, nameColor.B*255
+            local coloredName = string.format('<font color="rgb(%d,%d,%d)">%s</font>', r, g, b, player.Name)
+
+            -- Takım adı (her zaman sarı)
+            local teamName = player.Team and player.Team.Name or ""
+            local teamPart = ""
+            if teamName ~= "" then
+                teamPart = string.format(' <font color="rgb(255,255,255)">(%s)</font>', teamName)
+            end
+
+            -- Can (her zaman sarı)
+            local healthPart = ""
+            if humanoid and espShowHealth then
+                local hp = math.floor(humanoid.Health)
+                local maxHp = math.floor(humanoid.MaxHealth)
+                healthPart = string.format('\n<font color="rgb(0,0,0)">[%d/%d]</font>', hp, maxHp)
+            end
+
+            textLabel.Text = coloredName .. teamPart .. healthPart
+        end
+
+        updateVisuals()
+
+        if humanoid then
+            healthConnections[player] = humanoid.HealthChanged:Connect(updateVisuals)
+        end
+
+        player:GetPropertyChangedSignal("Team"):Connect(updateVisuals)
+        localPlayer:GetPropertyChangedSignal("Team"):Connect(updateVisuals)
+    end
+
+    local conn = player.CharacterAdded:Connect(addVisuals)
+    espConnections[player] = conn
+
+    if player.Character then
+        task.spawn(function()
+            addVisuals(player.Character)
+        end)
+    end
+end
+
+local function refreshAllESP()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= localPlayer and plr.Character then
+            local folder = plr.Character:FindFirstChild("TeamESP")
+            if folder then
+                for _, child in ipairs(folder:GetChildren()) do
+                    if child:IsA("Highlight") or child:IsA("BillboardGui") then
+                        child.Enabled = espEnabled
+                    end
+                    if child:IsA("BillboardGui") then
+                        child.Size = UDim2.new(0, 80 * espSize, 0, 30 * espSize)
+                        local label = child:FindFirstChild("TextLabel")
+                        if label then
+                            label.TextSize = 9 * espSize
+                            -- RichText zaten true, renkler etiketlerle belirleniyor
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function initESP()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= localPlayer then
+            createESP(player)
+        end
+    end
+    refreshAllESP()
+end
+
+Players.PlayerAdded:Connect(function(player)
+    if player ~= localPlayer then
+        createESP(player)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    if espConnections[player] then
+        espConnections[player]:Disconnect()
+        espConnections[player] = nil
+    end
+    removeESP(player)
+end)
+
+-- ============================
+--         CMDBAR (ANA)
+-- ============================
+
 local function splitString(str, sep)
     local parts = {}
     for match in string.gmatch(str, "([^" .. sep .. "]+)") do
@@ -25,7 +199,6 @@ local function splitString(str, sep)
     return parts
 end
 
--- Variables
 local character, humanoidRootPart, humanoid
 local flying = false
 local noclip = false
@@ -50,11 +223,9 @@ local upButton, downButton
 local upPressed = false
 local downPressed = false
 
--- Game info
 local gameName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name or game.Name
 local placeId = game.PlaceId
 
--- Webhook (improved)
 local function sendWebhook(message)
     if not WEBHOOK_URL or WEBHOOK_URL == "" then return end
     local data = {
@@ -71,7 +242,6 @@ local function sendWebhook(message)
     end)
 end
 
--- Find player
 local function findPlayer(namePart)
     if not namePart then return nil end
     namePart = string.lower(namePart)
@@ -86,13 +256,13 @@ local function findPlayer(namePart)
     return nil
 end
 
--- Update status and speed input visibility
 local function updateStatus()
     if not statusLabel then return end
     local flyText = flying and "on 🟢" or "off 🔴"
     local noclipText = noclip and "on 🟢" or "off 🔴"
     local loopText = loopDirection and "on 🟢" or "off 🔴"
-    statusLabel.Text = string.format("Fly: %s  Noclip: %s  Loop: %s", flyText, noclipText, loopText)
+    local espText = espEnabled and "on 🟢" or "off 🔴"
+    statusLabel.Text = string.format("Fly:%s Noclip:%s Loop:%s ESP:%s", flyText, noclipText, loopText, espText)
 
     if flySpeedInput and loopSpeedInput then
         local showFly = flying
@@ -115,14 +285,12 @@ local function updateStatus()
         end
     end
 
-    -- Show/hide up/down buttons
     if upButton and downButton then
         upButton.Visible = flying
         downButton.Visible = flying
     end
 end
 
--- Noclip
 local function setNoclip(state)
     noclip = state
     if character then
@@ -135,7 +303,6 @@ local function setNoclip(state)
     updateStatus()
 end
 
--- Fly
 local function startFly(speed)
     if not humanoidRootPart or not humanoid then return end
     if flying then
@@ -173,7 +340,6 @@ local function startFly(speed)
         if uis:IsKeyDown(Enum.KeyCode.A) then moveDir -= camera.CFrame.RightVector end
         if uis:IsKeyDown(Enum.KeyCode.D) then moveDir += camera.CFrame.RightVector end
 
-        -- Vertical movement (keyboard)
         if uis:IsKeyDown(Enum.KeyCode.Space) or upPressed then
             moveDir += Vector3.new(0, 1, 0)
         end
@@ -181,7 +347,6 @@ local function startFly(speed)
             moveDir += Vector3.new(0, -1, 0)
         end
 
-        -- Mobile joystick (camera relative)
         if humanoid.MoveDirection.Magnitude > 0.1 then
             moveDir += humanoid.MoveDirection
         end
@@ -211,7 +376,6 @@ local function stopFly()
     updateStatus()
 end
 
--- View
 local function startView(plr)
     if not plr then return end
     targetPlayer = plr
@@ -234,7 +398,6 @@ local function stopView()
     targetPlayer = nil
 end
 
--- HeadSit
 local function startHeadSit(plr)
     if not plr or not humanoidRootPart then return end
     targetPlayer = plr
@@ -265,7 +428,6 @@ local function stopHeadSit()
     targetPlayer = nil
 end
 
--- InfJump
 local function toggleInfJump()
     infJumpActive = not infJumpActive
     if infJumpConnection then infJumpConnection:Disconnect() infJumpConnection = nil end
@@ -276,7 +438,6 @@ local function toggleInfJump()
     end
 end
 
--- AntiKB
 local function toggleAntiKB()
     antiKB_Active = not antiKB_Active
     if antiKBConnection then antiKBConnection:Disconnect() antiKBConnection = nil end
@@ -290,7 +451,6 @@ local function toggleAntiKB()
     end
 end
 
--- Loop
 local function startLoop(dir)
     if loopConnection then loopConnection:Disconnect() loopConnection = nil end
 
@@ -325,7 +485,6 @@ local function startLoop(dir)
     updateStatus()
 end
 
--- Stop all active features
 local function stopAll()
     stopFly()
     setNoclip(false)
@@ -337,7 +496,44 @@ local function stopAll()
     if textBox then textBox.PlaceholderText = "✅ All features stopped" task.delay(2, function() if textBox then textBox.PlaceholderText = "Type command..." end end) end
 end
 
--- Help panel
+-- ============================
+--         ESP KOMUTLARI
+-- ============================
+local function handleESPCommand(args)
+    local sub = string.lower(args[2] or "")
+    if sub == "on" then
+        espEnabled = true
+        refreshAllESP()
+        updateStatus()
+        if textBox then textBox.PlaceholderText = "✅ ESP enabled" end
+    elseif sub == "off" then
+        espEnabled = false
+        refreshAllESP()
+        updateStatus()
+        if textBox then textBox.PlaceholderText = "❌ ESP disabled" end
+    elseif sub == "size" then
+        local val = tonumber(args[3])
+        if val and val >= 0.3 and val <= 3 then
+            espSize = val
+            refreshAllESP()
+            if textBox then textBox.PlaceholderText = "🔍 ESP size: " .. espSize end
+        else
+            if textBox then textBox.PlaceholderText = "⚠️ Use: esp size <0.3-3>" end
+        end
+    elseif sub == "health" then
+        espShowHealth = not espShowHealth
+        refreshAllESP()
+        updateStatus()
+        if textBox then textBox.PlaceholderText = "❤️ Health " .. (espShowHealth and "ON" or "OFF") end
+    else
+        if textBox then textBox.PlaceholderText = "⚠️ Usage: esp on/off/size/health" end
+    end
+    task.delay(2, function() if textBox and textBox.PlaceholderText ~= "Type command..." then textBox.PlaceholderText = "Type command..." end end)
+end
+
+-- ============================
+--         HELP PANEL
+-- ============================
 local helpPanel = nil
 local function openHelpPanel()
     if helpPanel then return end
@@ -400,6 +596,9 @@ local function openHelpPanel()
         {"loop <w/s/a/d/space/jump/off>", "Loop movement"},
         {"unloop", "Stop loop"},
         {"stop", "Stop all features"},
+        {"esp on/off", "Enable/Disable ESP"},
+        {"esp size <0.3-3>", "Set ESP text size"},
+        {"esp health", "Toggle health display"},
         {"help", "Show this help"},
     }
 
@@ -409,9 +608,9 @@ local function openHelpPanel()
         line.Size = UDim2.new(1, 0, 0, 20)
         line.Position = UDim2.new(0, 0, 0, y)
         line.BackgroundTransparency = 1
-        line.Text = string.format("%-15s  %s", cmd[1], cmd[2])
+        line.Text = string.format("%-18s  %s", cmd[1], cmd[2])
         line.TextColor3 = Color3.fromRGB(200, 200, 200)
-        line.TextSize = 12
+        line.TextSize = 11
         line.Font = Enum.Font.Gotham
         line.TextXAlignment = Enum.TextXAlignment.Left
         line.Parent = scroll
@@ -421,7 +620,9 @@ local function openHelpPanel()
     scroll.CanvasSize = UDim2.new(0, 0, 0, y + 10)
 end
 
--- Command processor
+-- ============================
+--         KOMUT İŞLEYİCİ
+-- ============================
 local function processCommand(message)
     if not message or message == "" then return end
 
@@ -486,6 +687,8 @@ local function processCommand(message)
         elseif cmd == "loop" and param then startLoop(string.lower(param))
         elseif cmd == "unloop" then startLoop("off")
         elseif cmd == "stop" then stopAll()
+        elseif cmd == "esp" then
+            handleESPCommand(args)
         else
             if textBox then textBox.PlaceholderText = "❌ Unknown command!" task.delay(1.5, function() if textBox then textBox.PlaceholderText = "Type command..." end end) end
         end
@@ -497,14 +700,15 @@ local function processCommand(message)
     end
 end
 
--- GUI creation
+-- ============================
+--         GUI OLUŞTURMA
+-- ============================
 local function createGUI()
     screenGui = Instance.new("ScreenGui")
     screenGui.Name = "MobileCmdBar"
     screenGui.ResetOnSpawn = false
     screenGui.Parent = guiParent
 
-    -- Startup black overlay with "Type "help" in the chat or cmdbar to learn the commands." text
     local startupOverlay = Instance.new("Frame")
     startupOverlay.Size = UDim2.new(1, 0, 1, 0)
     startupOverlay.BackgroundColor3 = Color3.new(0, 0, 0)
@@ -524,11 +728,10 @@ local function createGUI()
         if startupOverlay then startupOverlay:Destroy() end
     end)
 
-    -- Main frame (black background)
     local mainFrame = Instance.new("Frame")
     mainFrame.Size = UDim2.new(0, 280, 0, 130)
     mainFrame.Position = UDim2.new(1, -300, 0, 10)
-    mainFrame.BackgroundColor3 = Color3.new(0, 0, 0) -- black
+    mainFrame.BackgroundColor3 = Color3.new(0, 0, 0)
     mainFrame.BorderSizePixel = 0
     mainFrame.Parent = screenGui
     Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 4)
@@ -567,19 +770,17 @@ local function createGUI()
     contentContainer.BackgroundTransparency = 1
     contentContainer.Parent = mainFrame
 
-    -- Status line
     statusLabel = Instance.new("TextLabel")
     statusLabel.Size = UDim2.new(0.6, -4, 0, 15)
     statusLabel.Position = UDim2.new(0, 4, 1, -34)
     statusLabel.BackgroundTransparency = 1
-    statusLabel.Text = "Fly: off  Noclip: off  Loop: off"
+    statusLabel.Text = "Fly:off Noclip:off Loop:off ESP:off"
     statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-    statusLabel.TextSize = 9
+    statusLabel.TextSize = 8
     statusLabel.Font = Enum.Font.Gotham
     statusLabel.TextXAlignment = Enum.TextXAlignment.Left
     statusLabel.Parent = contentContainer
 
-    -- Credit label
     creditLabel = Instance.new("TextLabel")
     creditLabel.Size = UDim2.new(1, -8, 0, 12)
     creditLabel.Position = UDim2.new(0, 4, 1, -18)
@@ -591,7 +792,6 @@ local function createGUI()
     creditLabel.TextXAlignment = Enum.TextXAlignment.Left
     creditLabel.Parent = contentContainer
 
-    -- Speed input container
     local speedInputContainer = Instance.new("Frame")
     speedInputContainer.Size = UDim2.new(0.4, -4, 0, 15)
     speedInputContainer.Position = UDim2.new(0.6, 0, 1, -34)
@@ -652,7 +852,6 @@ local function createGUI()
         end
     end)
 
-    -- Command text box
     textBox = Instance.new("TextBox")
     textBox.Size = UDim2.new(1, -80, 0, 35)
     textBox.Position = UDim2.new(0, 8, 0, 5)
@@ -691,7 +890,6 @@ local function createGUI()
     suggestionLabel.TextXAlignment = Enum.TextXAlignment.Left
     suggestionLabel.Parent = contentContainer
 
-    -- Mobile fly up/down buttons
     local function createFlyButton(text, pos, isUp)
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(0, 40, 0, 30)
@@ -721,7 +919,6 @@ local function createGUI()
     upButton = createFlyButton("▲", UDim2.new(0, 8, 0, 43), true)
     downButton = createFlyButton("▼", UDim2.new(0, 52, 0, 43), false)
 
-    -- Minimize
     local minimized = false
     minimizeBtn.MouseButton1Click:Connect(function()
         minimized = not minimized
@@ -730,7 +927,6 @@ local function createGUI()
         minimizeBtn.Text = minimized and "+" or "−"
     end)
 
-    -- Dragging
     local dragging, dragInput, dragStart, startPos
     topBar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -756,7 +952,6 @@ local function createGUI()
         end
     end)
 
-    -- Command execution
     execButton.MouseButton1Click:Connect(function()
         local txt = textBox.Text
         if txt ~= "" then
@@ -777,12 +972,10 @@ local function createGUI()
         end
     end)
 
-    -- Chat commands
     localPlayer.Chatted:Connect(function(msg)
         processCommand(msg)
     end)
 
-    -- Command history
     uis.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
         if input.KeyCode == Enum.KeyCode.Up then
@@ -801,7 +994,6 @@ local function createGUI()
         end
     end)
 
-    -- Auto-suggestion
     textBox.Changed:Connect(function(property)
         if property ~= "Text" then return end
         local txt = textBox.Text
@@ -827,7 +1019,9 @@ local function createGUI()
     updateStatus()
 end
 
--- Setup character
+-- ============================
+--         KARAKTER YÖNETİMİ
+-- ============================
 local function setupCharacter(newChar)
     character = newChar
     humanoidRootPart = character:WaitForChild("HumanoidRootPart", 10)
@@ -851,10 +1045,12 @@ local function setupCharacter(newChar)
     updateStatus()
 end
 
--- Create GUI
+-- ============================
+--         BAŞLAT
+-- ============================
 createGUI()
+initESP()
 
--- Wait for initial character
 local function waitForCharacter()
     repeat task.wait() until localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") and localPlayer.Character:FindFirstChild("Humanoid")
     setupCharacter(localPlayer.Character)
@@ -886,4 +1082,4 @@ localPlayer.CharacterRemoving:Connect(function()
     print("[MobileCmdBar] Character removed.")
 end)
 
-print("[MobileCmdBar] Script loaded! (v10)")
+print("[MobileCmdBar] Script loaded! (ESP integrated - starts OFF)")
