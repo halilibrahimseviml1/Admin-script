@@ -1,6 +1,6 @@
 -- ============================================
---         LIGHTNING MOBILE CMDBAR + ESP
---         prepared by halilibrahimseviml1
+--          LIGHTNING MOBILE CMDBAR + ESP
+--          prepared by halilibrahimseviml1
 -- ============================================
 
 local Players = game:GetService("Players")
@@ -12,10 +12,24 @@ local coreGui = game:GetService("CoreGui")
 local httpService = game:GetService("HttpService")
 local marketplaceService = game:GetService("MarketplaceService")
 
--- GUI Parent (gethui desteği ile)
-local guiParent = (gethui and gethui()) or (pcall(function() return coreGui:IsA("CoreGui") end) and coreGui) or localPlayer:WaitForChild("PlayerGui")
+-- GUI Parent (Tüm Executor'lar İçin Güvenli Erişim)
+local guiParent
+if gethui then
+    guiParent = gethui()
+else
+    local success = pcall(function()
+        local testFrame = Instance.new("Frame")
+        testFrame.Parent = coreGui
+        testFrame:Destroy()
+    end)
+    if success then
+        guiParent = coreGui
+    else
+        guiParent = localPlayer:WaitForChild("PlayerGui")
+    end
+end
 
--- Remove old panel
+-- Eski Panelleri Temizle
 if guiParent:FindFirstChild("MobileCmdBar") then
     guiParent.MobileCmdBar:Destroy()
 end
@@ -24,9 +38,9 @@ if guiParent:FindFirstChild("KeySystemGui") then
 end
 
 -- ============================
---         KEY SİSTEMİ
+--          KEY SİSTEMİ
 -- ============================
-local CORRECT_KEY = "lightning2026" -- Buradan key'i değiştirebilirsin
+local CORRECT_KEY = "lightning2026"
 
 local function startKeySystem(onSuccess)
     local keyGui = Instance.new("ScreenGui")
@@ -39,6 +53,8 @@ local function startKeySystem(onSuccess)
     mainFrame.Position = UDim2.new(0.5, -150, 0.5, -80)
     mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
     mainFrame.BorderSizePixel = 0
+    mainFrame.Active = true
+    mainFrame.Draggable = true
     mainFrame.Parent = keyGui
     Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 6)
 
@@ -100,7 +116,7 @@ local function startKeySystem(onSuccess)
 end
 
 -- ============================
---         ESP MODÜLÜ
+--          ESP MODÜLÜ
 -- ============================
 local espEnabled = false
 local espSize = 1.0
@@ -265,51 +281,73 @@ Players.PlayerRemoving:Connect(function(player)
 end)
 
 -- ============================
---         CMDBAR (ANA)
+--        CMDBAR & UI
 -- ============================
-
-local function splitString(str, sep)
-    local parts = {}
-    for match in string.gmatch(str, "([^" .. sep .. "]+)") do
-        table.insert(parts, match)
-    end
-    return parts
-end
-
-local character, humanoidRootPart, humanoid
-local flying = false
-local noclip = false
-local viewing = false
-local sittingOnHead = false
-local targetPlayer = nil
-local flyConnection, viewConnection, headSitConnection, jumpConnection, loopConnection, noclipConnection
-local infJumpConnection, antiKBConnection
-local infJumpActive = false
-local antiKB_Active = false
-local loopDirection = nil
-local flySpeed = 50
-local loopSpeed = 16
-local cooldown = 0.4
-local lastCmdTime = 0
-local history = {}
-local historyIndex = 0
-
-local screenGui, textBox, statusLabel, suggestionLabel, creditLabel
-local flySpeedInput, loopSpeedInput
-local upButton, downButton
-local upPressed = false
-local downPressed = false
-
-local gameName = game.Name
-pcall(function()
-    gameName = marketplaceService:GetProductInfo(game.PlaceId).Name or game.Name
-end)
-local placeId = game.PlaceId
 
 local function sendWebhook(message)
     local url = (getgenv and getgenv().WEBHOOK_URL) or _G.WEBHOOK_URL or (typeof(WEBHOOK_URL) == "string" and WEBHOOK_URL)
     if not url or url == "" then return end
-    
+
+    local requestFunc = (syn and syn.request) or (http and http.request) or http_request or request
+    if not requestFunc then return end
+
     local data = {
-        content = string.format(
-            "**[CMD] %s** (Place: %s [%d])\n```%s
+        content = string.format("**[CMD] %s** (Place: %s [%d])\n```%s```", localPlayer.Name, marketplaceService:GetProductInfo(game.PlaceId).Name or game.Name, game.PlaceId, message)
+    }
+
+    pcall(function()
+        requestFunc({
+            Url = url,
+            Method = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body = httpService:JSONEncode(data)
+        })
+    end)
+end
+
+local function buildMainPanel()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "MobileCmdBar"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = guiParent
+
+    local cmdFrame = Instance.new("Frame")
+    cmdFrame.Size = UDim2.new(0, 280, 0, 40)
+    cmdFrame.Position = UDim2.new(0.5, -140, 0.8, 0)
+    cmdFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    cmdFrame.BorderSizePixel = 0
+    cmdFrame.Active = true
+    cmdFrame.Draggable = true
+    cmdFrame.Parent = screenGui
+    Instance.new("UICorner", cmdFrame).CornerRadius = UDim.new(0, 6)
+
+    local textBox = Instance.new("TextBox")
+    textBox.Size = UDim2.new(1, -20, 1, -10)
+    textBox.Position = UDim2.new(0, 10, 0, 5)
+    textBox.BackgroundTransparency = 1
+    textBox.Text = ""
+    textBox.PlaceholderText = "Type command here..."
+    textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+    textBox.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
+    textBox.TextSize = 13
+    textBox.Font = Enum.Font.Gotham
+    textBox.Parent = cmdFrame
+
+    textBox.FocusLost:Connect(function(enterPressed)
+        if enterPressed and textBox.Text ~= "" then
+            sendWebhook(textBox.Text)
+            if textBox.Text:lower() == "esp" then
+                espEnabled = not espEnabled
+                refreshAllESP()
+            end
+            textBox.Text = ""
+        end
+    end)
+    
+    initESP()
+end
+
+-- Key Sistemini Başlat
+startKeySystem(function()
+    buildMainPanel()
+end)
