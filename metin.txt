@@ -929,206 +929,155 @@ local function showHelpMenu()
 
     createSection("📌 AVAILABLE COMMANDS", 
         "• <b>help</b> : Opens this help and documentation menu.\n"..
-        "• <b>esp</b> : Opens ESP settings UI panel to toggle team colors or turn ESP off.\n"..
-        "• <b>fly</b> : Opens a UI panel to configure flight speed and spawns UP (e) / DOWN (q) control buttons on the left.\n"..
-        "• <b>noclip</b> : Activates noclip and displays an active status UI with a green check and OFF button.\n"..
-        "• <b>un noclip</b> / <b>unnoclip</b> : Disables noclip and removes its status UI.\n"..
-        "• <b>speed</b> : Opens a UI panel to configure and apply custom walk speed.\n"..
-        "• <b>jump</b> : Opens a UI panel to configure and apply custom jump power.\n"..
-        "• <b>loopw</b> : Continuously moves the character forward automatically at a chosen speed with an active status UI.\n"..
-        "• <b>loops</b> : Continuously moves the character backward automatically at a chosen speed with an active status UI.\n"..
-        "• <b>loopa</b> : Continuously moves the character left automatically at a chosen speed with an active status UI.\n"..
-        "• <b>loopd</b> : Continuously moves the character right automatically at a chosen speed with an active status UI."
-    )
-
-    createSection("⚙️ GUI PARENT & EXECUTOR COMPATIBILITY", 
-        "<b>Code Explanation:</b>\nChecks for <code>gethui()</code> on startup to securely load the UI safely hidden inside exploitation environments. Falls back to <code>CoreGui</code> or <code>PlayerGui</code> if unavailable."
-    )
-
-    createSection("👁️ ESP MODULE LOGIC & UI", 
-        "<b>Code Explanation:</b>\nDetects players via <code>Players.PlayerAdded</code>, attaching a <code>Highlight</code> box and a <code>BillboardGui</code> text element showing health status. The <code>esp</code> command launches a settings menu allowing users to toggle Team Color mode or turn off ESP entirely."
-    )
-
-    createSection("✈️ FLY, UP/DOWN CONTROLS & NOCLIP", 
-        "<b>Code Explanation:</b>\nActivating <code>fly</code> spawns floating UP (e) and DOWN (q) buttons on the left side of the screen for mobile users, which can also be controlled via keyboard keys (E and Q). It also generates a status panel with an OFF button."
-    )
-
-    createSection("🔄 CONTINUOUS MOVEMENT & CONFIG PANELS", 
-        "<b>Code Explanation:</b>\nCommands like <code>speed</code>, <code>jump</code>, and <code>loopw/s/a/d</code> prompt a configuration UI panel to input exact values. Loop commands spawn an active indicator panel with an OFF button to terminate movement instantly."
-    )
-
-    createSection("🌐 DISCORD WEBHOOK LOGGING", 
-        "<b>Code Explanation:</b>\nLogs all executed commands along with Place ID, Game Name, and Player Name to your configured Discord Webhook URL via POST requests."
+        "• <b>esp</b> : Opens ESP settings menu.\n"..
+        "• <b>music</b> : Opens Music ID GUI.\n"..
+        "• <b>fly [speed]</b> : Enables flight mode with optional speed.\n"..
+        "• <b>unfly</b> : Disables flight mode.\n"..
+        "• <b>noclip</b> : Enables noclip.\n"..
+        "• <b>unnoclip</b> : Disables noclip.\n"..
+        "• <b>speed [val]</b> : Sets walkspeed.\n"..
+        "• <b>jump [val]</b> : Sets jumppower.\n"..
+        "• <b>loopw / loops / loopa / loopd [speed]</b> : Loop movement in directions.\n"..
+        "• <b>unloop</b> : Stops loop movement."
     )
 end
 
-local function buildMainPanel()
+-- Mobile Command Bar UI (Original Design)
+local function createCmdBar()
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "MobileCmdBar"
     screenGui.ResetOnSpawn = false
-    screenGui.DisplayOrder = 1 -- Main UI base level
     screenGui.Parent = guiParent
 
     local mainFrame = Instance.new("Frame")
-    mainFrame.Size = UDim2.new(0, 420, 0, 80)
-    mainFrame.Position = UDim2.new(0.5, -210, 0.8, 0)
-    mainFrame.BackgroundColor3 = Color3.fromRGB(25, 30, 40)
+    mainFrame.Size = UDim2.new(0, 320, 0, 45)
+    mainFrame.Position = UDim2.new(0.5, -160, 0.02, 0)
+    mainFrame.BackgroundColor3 = Color3.fromRGB(20, 24, 33)
     mainFrame.BorderSizePixel = 0
     mainFrame.Active = true
     mainFrame.Draggable = true
     mainFrame.Parent = screenGui
-    Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 4)
-
-    local topBar = Instance.new("Frame")
-    topBar.Size = UDim2.new(1, 0, 0, 32)
-    topBar.BackgroundColor3 = Color3.fromRGB(160, 0, 0)
-    topBar.BorderSizePixel = 0
-    topBar.Parent = mainFrame
-    Instance.new("UICorner", topBar).CornerRadius = UDim.new(0, 4)
-
-    local topBarCover = Instance.new("Frame")
-    topBarCover.Size = UDim2.new(1, 0, 0, 6)
-    topBarCover.Position = UDim2.new(0, 0, 1, -6)
-    topBarCover.BackgroundColor3 = Color3.fromRGB(160, 0, 0)
-    topBarCover.BorderSizePixel = 0
-    topBarCover.Parent = topBar
-
-    local titleLabel = Instance.new("TextLabel")
-    titleLabel.Size = UDim2.new(0, 150, 1, 0)
-    titleLabel.Position = UDim2.new(0, 12, 0, 0)
-    titleLabel.BackgroundTransparency = 1
-    titleLabel.Text = "CMDBAR2"
-    titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    titleLabel.TextSize = 16
-    titleLabel.Font = Enum.Font.GothamBold
-    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    titleLabel.Parent = topBar
-
-    local closeBtn = Instance.new("TextButton")
-    closeBtn.Size = UDim2.new(0, 32, 0, 32)
-    closeBtn.Position = UDim2.new(1, -32, 0, 0)
-    closeBtn.BackgroundColor3 = Color3.fromRGB(140, 0, 0)
-    closeBtn.BorderSizePixel = 0
-    closeBtn.Text = "X"
-    closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    closeBtn.TextSize = 14
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.Parent = topBar
-
-    local minBtn = Instance.new("TextButton")
-    minBtn.Size = UDim2.new(0, 32, 0, 32)
-    minBtn.Position = UDim2.new(1, -64, 0, 0)
-    minBtn.BackgroundColor3 = Color3.fromRGB(140, 0, 0)
-    minBtn.BorderSizePixel = 0
-    minBtn.Text = "-"
-    minBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    minBtn.TextSize = 16
-    minBtn.Font = Enum.Font.GothamBold
-    minBtn.Parent = topBar
+    Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 6)
 
     local textBox = Instance.new("TextBox")
-    textBox.Size = UDim2.new(1, -145, 0, 36)
-    textBox.Position = UDim2.new(0, 10, 0, 38)
-    textBox.BackgroundColor3 = Color3.fromRGB(20, 22, 28)
-    textBox.BorderSizePixel = 0
+    textBox.Size = UDim2.new(1, -55, 1, 0)
+    textBox.Position = UDim2.new(0, 10, 0, 0)
+    textBox.BackgroundTransparency = 1
+    textBox.PlaceholderText = "Type command here... (e.g. help)"
+    textBox.PlaceholderColor3 = Color3.fromRGB(130, 135, 145)
     textBox.Text = ""
-    textBox.PlaceholderText = "type help"
     textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-    textBox.PlaceholderColor3 = Color3.fromRGB(120, 125, 135)
-    textBox.TextSize = 13
+    textBox.TextSize = 12
     textBox.Font = Enum.Font.Gotham
     textBox.ClearTextOnFocus = false
     textBox.Parent = mainFrame
-    Instance.new("UICorner", textBox).CornerRadius = UDim.new(0, 4)
 
     local execBtn = Instance.new("TextButton")
-    execBtn.Size = UDim2.new(0, 115, 0, 36)
-    execBtn.Position = UDim2.new(1, -125, 0, 38)
-    execBtn.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
+    execBtn.Size = UDim2.new(0, 40, 0, 33)
+    execBtn.Position = UDim2.new(1, -45, 0.5, -16.5)
+    execBtn.BackgroundColor3 = Color3.fromRGB(160, 0, 0)
     execBtn.BorderSizePixel = 0
-    execBtn.Text = "EXECUTE"
+    execBtn.Text = "RUN"
     execBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    execBtn.TextSize = 13
+    execBtn.TextSize = 10
     execBtn.Font = Enum.Font.GothamBold
     execBtn.Parent = mainFrame
     Instance.new("UICorner", execBtn).CornerRadius = UDim.new(0, 4)
 
-    local function executeCommand()
-        local text = textBox.Text
-        local args = string.split(text, " ")
-        local lowerCmd = args[1] and args[1]:lower() or ""
+    local function processCommand(rawText)
+        local text = rawText:lower()
+        sendWebhook(rawText)
 
-        if text ~= "" then
-            if lowerCmd ~= "help" then
-                sendWebhook(text)
+        if text == "help" then
+            showHelpMenu()
+        elseif text == "esp" then
+            espEnabled = true
+            initESP()
+            createESPPanel()
+        elseif text == "music" then
+            pcall(function()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/halilibrahimseviml1/MusicID-gui/refs/heads/main/MusicId"))()
+            end)
+        elseif text:sub(1, 3) == "fly" then
+            local args = {}
+            for arg in text:gmatch("%S+") do table.insert(args, arg) end
+            local spd = tonumber(args[2]) or 50
+            toggleFly(spd)
+        elseif text == "unfly" then
+            stopFly()
+        elseif text == "noclip" then
+            toggleNoclip()
+        elseif text == "unnoclip" then
+            stopNoclip()
+        elseif text == "speed" then
+            createAdjustmentPanel("WALK SPEED", localPlayer.Character and localPlayer.Character:FindFirstChild("Humanoid") and localPlayer.Character.Humanoid.WalkSpeed or 16, function(val)
+                local char = localPlayer.Character
+                if char and char:FindFirstChild("Humanoid") then
+                    char.Humanoid.WalkSpeed = val
+                end
+            end)
+        elseif text:sub(1, 5) == "speed" then
+            local args = {}
+            for arg in text:gmatch("%S+") do table.insert(args, arg) end
+            local val = tonumber(args[2])
+            if val and localPlayer.Character and localPlayer.Character:FindFirstChild("Humanoid") then
+                localPlayer.Character.Humanoid.WalkSpeed = val
             end
-
-            if lowerCmd == "esp" then
-                espEnabled = true
-                createESPPanel()
-                refreshAllESP()
-            elseif lowerCmd == "fly" then
-                createAdjustmentPanel("SET FLY SPEED", 50, function(val)
-                    toggleFly(val)
-                end)
-            elseif lowerCmd == "noclip" then
-                toggleNoclip()
-            elseif (lowerCmd == "un" and args[2] and args[2]:lower() == "noclip") or lowerCmd == "unnoclip" then
-                stopNoclip()
-            elseif lowerCmd == "speed" then
-                createAdjustmentPanel("SET SPEED", 16, function(val)
-                    if localPlayer.Character and localPlayer.Character:FindFirstChild("Humanoid") then
-                        localPlayer.Character.Humanoid.WalkSpeed = val
-                    end
-                end)
-            elseif lowerCmd == "jump" then
-                createAdjustmentPanel("SET JUMP", 50, function(val)
-                    if localPlayer.Character and localPlayer.Character:FindFirstChild("Humanoid") then
-                        localPlayer.Character.Humanoid.JumpPower = val
-                    end
-                end)
-            elseif lowerCmd == "loopw" or lowerCmd == "loops" or lowerCmd == "loopa" or lowerCmd == "loopd" then
-                local dir = string.sub(lowerCmd, 5, 5)
-                createAdjustmentPanel("LOOP SPEED ("..string.upper(dir)..")", 20, function(val)
-                    startLoopMovement(dir, val or 20)
-                end)
-            elseif lowerCmd == "help" then
-                showHelpMenu()
+        elseif text == "jump" then
+            createAdjustmentPanel("JUMP POWER", localPlayer.Character and localPlayer.Character:FindFirstChild("Humanoid") and localPlayer.Character.Humanoid.JumpPower or 50, function(val)
+                local char = localPlayer.Character
+                if char and char:FindFirstChild("Humanoid") then
+                    char.Humanoid.JumpPower = val
+                end
+            end)
+        elseif text:sub(1, 4) == "jump" then
+            local args = {}
+            for arg in text:gmatch("%S+") do table.insert(args, arg) end
+            local val = tonumber(args[2])
+            if val and localPlayer.Character and localPlayer.Character:FindFirstChild("Humanoid") then
+                localPlayer.Character.Humanoid.JumpPower = val
             end
-            textBox.Text = ""
+        elseif text:sub(1, 5) == "loopw" then
+            local args = {}
+            for arg in text:gmatch("%S+") do table.insert(args, arg) end
+            local spd = tonumber(args[2]) or 16
+            startLoopMovement("w", spd)
+        elseif text:sub(1, 5) == "loops" then
+            local args = {}
+            for arg in text:gmatch("%S+") do table.insert(args, arg) end
+            local spd = tonumber(args[2]) or 16
+            startLoopMovement("s", spd)
+        elseif text:sub(1, 5) == "loopa" then
+            local args = {}
+            for arg in text:gmatch("%S+") do table.insert(args, arg) end
+            local spd = tonumber(args[2]) or 16
+            startLoopMovement("a", spd)
+        elseif text:sub(1, 5) == "loopd" then
+            local args = {}
+            for arg in text:gmatch("%S+") do table.insert(args, arg) end
+            local spd = tonumber(args[2]) or 16
+            startLoopMovement("d", spd)
+        elseif text == "unloop" then
+            stopCurrentLoop()
         end
     end
 
-    execBtn.MouseButton1Click:Connect(executeCommand)
+    execBtn.MouseButton1Click:Connect(function()
+        processCommand(textBox.Text)
+        textBox.Text = ""
+    end)
+
     textBox.FocusLost:Connect(function(enterPressed)
         if enterPressed then
-            executeCommand()
+            processCommand(textBox.Text)
+            textBox.Text = ""
         end
     end)
-
-    closeBtn.MouseButton1Click:Connect(function()
-        screenGui:Destroy()
-    end)
-
-    local minimized = false
-    minBtn.MouseButton1Click:Connect(function()
-        minimized = not minimized
-        if minimized then
-            mainFrame.Size = UDim2.new(0, 420, 0, 32)
-            textBox.Visible = false
-            execBtn.Visible = false
-            minBtn.Text = "+"
-        else
-            mainFrame.Size = UDim2.new(0, 420, 0, 80)
-            textBox.Visible = true
-            execBtn.Visible = true
-            minBtn.Text = "-"
-        end
-    end)
-    
-    initESP()
 end
 
--- Start Script
-buildMainPanel()
-showWelcomePopup()
+-- Initialize Everything
+task.spawn(function()
+    initESP()
+    createCmdBar()
+    showWelcomePopup()
+end)
