@@ -1,16 +1,10 @@
--- // LIGHTNING HUB - Key System
--- // Prepared by: halilibrahimseviml1
-
 local Players = game:GetService("Players")
-local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
 
-local LocalPlayer = Players.LocalPlayer
 local KeyListURL = "https://pastebin.com/raw/4XqE6xg0"
 local DiscordURL = "https://discord.gg/Aju5HECm3"
 
--- Key System GUI Setup
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "LightningKeySystem"
 ScreenGui.Parent = CoreGui
@@ -79,11 +73,10 @@ local GetKeyCorner = Instance.new("UICorner")
 GetKeyCorner.CornerRadius = UDim.new(0, 6)
 GetKeyCorner.Parent = GetKeyBtn
 
--- Yan Bildirim (Notification) Arayüzü
 local function ShowNotification(message)
     local NotifFrame = Instance.new("Frame")
     NotifFrame.Size = UDim2.new(0, 180, 0, 40)
-    NotifFrame.Position = UDim2.new(1, 10, 0.5, -20) -- Sağ tarafta gizli başlar
+    NotifFrame.Position = UDim2.new(1, 10, 0.5, -20)
     NotifFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
     NotifFrame.BorderSizePixel = 0
     NotifFrame.Parent = MainFrame
@@ -101,12 +94,10 @@ local function ShowNotification(message)
     NotifText.Font = Enum.Font.GothamBold
     NotifText.Parent = NotifFrame
 
-    -- Kayma Animasyonu (İçeri Kayma)
     TweenService:Create(NotifFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-        Position = UDim2.new(1, 15, 0.5, -20)
+        Position = UDim2.new(1, -190, 0.5, -20)
     }):Play()
 
-    -- 2 saniye sonra kaybolma
     task.delay(2, function()
         local tweenOut = TweenService:Create(NotifFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
             Position = UDim2.new(1, 10, 0.5, -20)
@@ -118,7 +109,6 @@ local function ShowNotification(message)
     end)
 end
 
--- Get Key Buton Mantığı
 GetKeyBtn.MouseButton1Click:Connect(function()
     if setclipboard then
         setclipboard(DiscordURL)
@@ -128,13 +118,20 @@ GetKeyBtn.MouseButton1Click:Connect(function()
     ShowNotification("Kopyalandı!")
 end)
 
--- Function to launch main script upon valid key
-local function StartMainScript()
-    ScreenGui:Destroy()
-    print("Key verified! Executing script...")
+SubmitBtn.MouseButton1Click:Connect(function()
+    local success, result = pcall(function()
+        return game:HttpGet(KeyListURL)
+    end)
     
-    -- // YOUR MAIN SCRIPT CODES GO HERE //
-local Players = game:GetService("Players")
+    if success and result then
+        if string.find(result, TextBox.Text) and TextBox.Text ~= "" then
+            ShowNotification("Başarılı!")
+            task.wait(1)
+            ScreenGui:Destroy()
+            print("Key verified! Executing script...")
+            
+            -- // ANA SCRIPTINIZI BURAYA YAZIN //
+ local Players = game:GetService("Players")
 local localPlayer = Players.LocalPlayer
 local uis = game:GetService("UserInputService")
 local runService = game:GetService("RunService")
@@ -1211,39 +1208,11 @@ task.spawn(function()
     initESP()
     createCmdBar()
     showWelcomePopup()
-end)
--- Key Verification Handling
-SubmitBtn.MouseButton1Click:Connect(function()
-    local userKey = TextBox.Text
-    
-    local success, result = pcall(function()
-        return game:HttpGet(KeyListURL)
-    end)
-    
-    if success then
-        local isValid = false
-        for key in string.gmatch(result, "[^\r\n]+") do
-            if string.match(key, "^%s*(.-)%s*$") == userKey then
-                isValid = true
-                break
-            end
-        end
-        
-        if isValid then
-            SubmitBtn.Text = "Success!"
-            SubmitBtn.BackgroundColor3 = Color3.fromRGB(0, 255, 128)
-            task.wait(1)
-            StartMainScript()
+end)           
         else
-            SubmitBtn.Text = "Invalid Key!"
-            SubmitBtn.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
-            task.wait(1.5)
-            SubmitBtn.Text = "Submit Key"
-            SubmitBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+            ShowNotification("Geçersiz Key!")
         end
     else
-        SubmitBtn.Text = "Connection Error!"
-        task.wait(1.5)
-        SubmitBtn.Text = "Submit Key"
+        ShowNotification("Bağlantı Hatası!")
     end
 end)
